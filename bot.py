@@ -1,49 +1,74 @@
 import os
-import logging
 import sys
+import logging
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
-# Load environment variables
-load_dotenv()
-BOT_TOKEN = os.getenv('BOT_TOKEN')
+# Force flush stdout/stderr immediately
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
 
-# Set up detailed logging
+# Set up logging to see everything
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO,
+    level=logging.DEBUG,  # DEBUG level gives maximum info
     handlers=[
         logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger(__name__)
 
+logger.info("🚀 BOT STARTING UP...")
+logger.info(f"🔍 Python version: {sys.version}")
+
+# Try loading environment variables
+logger.info("📂 Loading environment variables...")
+load_dotenv()
+
+# Get token - try multiple methods
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+if not BOT_TOKEN:
+    # Try alternative method
+    BOT_TOKEN = os.environ.get('BOT_TOKEN')
+    
+if not BOT_TOKEN:
+    logger.error("❌❌❌ CRITICAL: BOT_TOKEN environment variable not found!")
+    logger.error("💡 Please add BOT_TOKEN to Railway environment variables")
+    logger.error("💡 Check: Railway Dashboard → Variables → Add BOT_TOKEN")
+    sys.exit(1)
+
+logger.info(f"✅ BOT_TOKEN found! Length: {len(BOT_TOKEN)} characters")
+logger.info(f"✅ Token starts with: {BOT_TOKEN[:10]}...")
+
+# Handler functions
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send a welcome message when /start is issued."""
-    await update.message.reply_text('📝 Hi! Send me any text, and I will count the words and characters for you.\n\nSend /help for more info.')
+    logger.info(f"📩 /start command received from {update.effective_user.username}")
+    await update.message.reply_text(
+        '📝 **Word Counter Bot**\n\n'
+        'Send me any text and I\'ll count:\n'
+        '• Words 📝\n'
+        '• Characters 🔠\n'
+        '• Sentences 📖\n\n'
+        'Send /help for commands'
+    )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send a help message when /help is issued."""
+    logger.info(f"📩 /help command received from {update.effective_user.username}")
     await update.message.reply_text(
-        '🤖 How to use this bot:\n\n'
-        '1. Send any text message\n'
-        '2. I will reply with:\n'
-        '   - 📝 Word count\n'
-        '   - 🔠 Character count\n\n'
-        'Commands:\n'
+        '🤖 **Commands:**\n'
         '/start - Welcome message\n'
-        '/help - Show this help'
+        '/help - Show this help\n\n'
+        '📝 **Just send any text!**'
     )
 
 async def count_words(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Count words and characters in the received text message."""
     try:
         text = update.message.text
+        logger.info(f"📩 Counting text from {update.effective_user.username}: {len(text)} chars")
+        
         word_count = len(text.split())
         char_count = len(text)
-        
-        # Count sentences (basic)
         sentence_count = text.count('.') + text.count('!') + text.count('?')
         
         response = (
@@ -52,45 +77,45 @@ async def count_words(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📖 **Sentence count:** {sentence_count}"
         )
         await update.message.reply_text(response)
+        logger.info(f"✅ Response sent: {word_count} words, {char_count} chars")
     except Exception as e:
-        logger.error(f"Error in count_words: {e}")
-        await update.message.reply_text("❌ Sorry, an error occurred while counting.")
+        logger.error(f"❌ Error in count_words: {e}", exc_info=True)
+        await update.message.reply_text("❌ Sorry, something went wrong!")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle errors gracefully."""
-    logger.error(f"Update {update} caused error {context.error}")
-    if update and update.message:
-        await update.message.reply_text("❌ Something went wrong. Please try again.")
+    logger.error(f"❌ Update {update} caused error: {context.error}", exc_info=True)
 
+# Main function
 def main():
-    """Start the bot with proper error handling."""
-    if not BOT_TOKEN:
-        logger.error("❌ BOT_TOKEN environment variable not set!")
-        logger.error("Please add BOT_TOKEN to Railway environment variables.")
-        sys.exit(1)
-    
-    logger.info("✅ BOT_TOKEN found successfully")
+    logger.info("🏗️ Building bot application...")
     
     try:
-        # Create the Application
-        application = ApplicationBuilder().token(BOT_TOKEN).build()
+        # Build application with timeout settings
+        application = ApplicationBuilder() \
+            .token(BOT_TOKEN) \
+            .connect_timeout(30.0) \
+            .read_timeout(30.0) \
+            .build()
         
-        # Register command handlers
+        logger.info("✅ Application built successfully")
+        
+        # Add handlers
         application.add_handler(CommandHandler('start', start))
         application.add_handler(CommandHandler('help', help_command))
-        
-        # Register handler for all text messages
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, count_words))
-        
-        # Register error handler
         application.add_error_handler(error_handler)
         
-        # Start the bot with long polling
-        logger.info("🚀 Bot is starting with long polling...")
-        application.run_polling(allowed_updates=Update.ALL_TYPES)
+        logger.info("✅ Handlers registered")
+        logger.info("🚀 STARTING BOT WITH POLLING...")
+        
+        # Start polling with error handling
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True
+        )
         
     except Exception as e:
-        logger.error(f"❌ Bot crashed with error: {e}")
+        logger.error(f"❌❌❌ FATAL ERROR: {e}", exc_info=True)
         sys.exit(1)
 
 if __name__ == '__main__':
